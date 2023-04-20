@@ -77,11 +77,11 @@ int main(int argc, char *argv[]) {
     // EXERCISE give-away: Choose an Execution Space.
     // typedef Kokkos::Serial   ExecSpace;
     // typedef Kokkos::Threads  ExecSpace;
-    // typedef Kokkos::OpenMP   ExecSpace;
+    typedef Kokkos::OpenMP ExecSpace;
     // typedef Kokkos::Cuda     ExecSpace;
 
     // EXERCISE: Choose device memory space.
-    // typedef Kokkos::HostSpace     MemSpace;
+    typedef Kokkos::HostSpace MemSpace;
     // typedef Kokkos::CudaSpace     MemSpace;
     // typedef Kokkos::CudaUVMSpace  MemSpace;
 
@@ -91,15 +91,15 @@ int main(int argc, char *argv[]) {
     //           However, performance will be different!
 
     // typedef Kokkos::LayoutLeft   Layout;
-    // typedef Kokkos::LayoutRight  Layout;
+    typedef Kokkos::LayoutRight Layout;
 
     // EXERCISE give-away: Use a RangePolicy.
-    // typedef Kokkos::RangePolicy<ExecSpace>  range_policy;
+    typedef Kokkos::RangePolicy<ExecSpace> range_policy;
 
     // Allocate y, x vectors and Matrix A on device.
     // EXERCISE: Use MemSpace and Layout.
-    typedef Kokkos::View<double *> ViewVectorType;
-    typedef Kokkos::View<double **> ViewMatrixType;
+    typedef Kokkos::View<double *, Layout, MemSpace> ViewVectorType;
+    typedef Kokkos::View<double **, Layout, MemSpace> ViewMatrixType;
     ViewVectorType y("y", N);
     ViewVectorType x("x", M);
     ViewMatrixType A("A", N, M);
@@ -141,7 +141,7 @@ int main(int argc, char *argv[]) {
       // EXERCISE: Use Kokkos::RangePolicy<ExecSpace> to execute parallel_reduce
       //           in the correct space.
       Kokkos::parallel_reduce(
-          N,
+          range_policy(0, N),
           KOKKOS_LAMBDA(int j, double &update) {
             double temp2 = 0;
 
