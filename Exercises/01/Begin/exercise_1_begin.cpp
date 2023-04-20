@@ -26,7 +26,7 @@
 
 // EXERCISE: Include Kokkos_Core.hpp.
 //           cmath library unnecessary after.
-// #include <Kokkos_Core.hpp>
+#include <Kokkos_Core.hpp>
 #include <cmath>
 
 void checkSizes(int &N, int &M, int &S, int &nrepeat);
@@ -76,100 +76,98 @@ int main(int argc, char *argv[]) {
   // EXERCISE: Initialize Kokkos runtime.
   //           Include braces to encapsulate code between initialize and
   //           finalize calls
-  // Kokkos::initialize( argc, argv );
-  // {
+  Kokkos::initialize(argc, argv);
+  {
+    // For the sake of simplicity in this exercise, we're using std::malloc
+    // directly, but later on we'll learn a better way, so generally don't do
+    // this in Kokkos programs. Allocate y, x vectors and Matrix A: EXERCISE:
+    // For the inpatient only: replace std::malloc with Kokkos::kokkos_malloc<>
+    //           This would enable running on GPUs, if KOKKOS_LAMBDA is used
+    //           instead of [=] as capture clause for all lambdas. It will be
+    //           properly introduced later.
+    auto y = static_cast<double *>(std::malloc(N * sizeof(double)));
+    auto x = static_cast<double *>(std::malloc(M * sizeof(double)));
+    auto A = static_cast<double *>(std::malloc(N * M * sizeof(double)));
 
-  // For the sake of simplicity in this exercise, we're using std::malloc
-  // directly, but later on we'll learn a better way, so generally don't do this
-  // in Kokkos programs. Allocate y, x vectors and Matrix A: EXERCISE: For the
-  // inpatient only: replace std::malloc with Kokkos::kokkos_malloc<>
-  //           This would enable running on GPUs, if KOKKOS_LAMBDA is used
-  //           instead of [=] as capture clause for all lambdas. It will be
-  //           properly introduced later.
-  auto y = static_cast<double *>(std::malloc(N * sizeof(double)));
-  auto x = static_cast<double *>(std::malloc(M * sizeof(double)));
-  auto A = static_cast<double *>(std::malloc(N * M * sizeof(double)));
+    // Initialize y vector.
+    // EXERCISE: Convert outer loop to Kokkos::parallel_for.
+    Kokkos::parallel_for(N, [=](const int64_t i) { y[i] = 1; });
 
-  // Initialize y vector.
-  // EXERCISE: Convert outer loop to Kokkos::parallel_for.
-  for (int i = 0; i < N; ++i) {
-    y[i] = 1;
-  }
+    // Initialize x vector.
+    // EXERCISE: Convert outer loop to Kokkos::parallel_for.
+    Kokkos::parallel_for(M, [=](const int64_t i) { x[i] = 1; });
 
-  // Initialize x vector.
-  // EXERCISE: Convert outer loop to Kokkos::parallel_for.
-  for (int i = 0; i < M; ++i) {
-    x[i] = 1;
-  }
-
-  // Initialize A matrix, note 2D indexing computation.
-  // EXERCISE: Convert outer loop to Kokkos::parallel_for.
-  for (int j = 0; j < N; ++j) {
-    for (int i = 0; i < M; ++i) {
-      A[j * M + i] = 1;
-    }
-  }
-
-  // Timer products.
-  // Kokkos::Timer timer;
-  struct timeval begin, end;
-
-  gettimeofday(&begin, NULL);
-
-  for (int repeat = 0; repeat < nrepeat; repeat++) {
-    // Application: <y,Ax> = y^T*A*x
-    double result = 0;
-
-    // EXERCISE: Convert outer loop to Kokkos::parallel_reduce.
-    for (int j = 0; j < N; ++j) {
-      double temp2 = 0;
-
+    // Initialize A matrix, note 2D indexing computation.
+    // EXERCISE: Convert outer loop to Kokkos::parallel_for.
+    Kokkos::parallel_for(N, [=](const int64_t j) {
       for (int i = 0; i < M; ++i) {
-        temp2 += A[j * M + i] * x[i];
+        A[j * M + i] = 1;
+      }
+    });
+
+    // Timer products.
+    // Kokkos::Timer timer;
+    struct timeval begin, end;
+
+    gettimeofday(&begin, NULL);
+
+    for (int repeat = 0; repeat < nrepeat; repeat++) {
+      // Application: <y,Ax> = y^T*A*x
+      double result = 0;
+
+      // EXERCISE: Convert outer loop to Kokkos::parallel_reduce.
+      Kokkos::parallel_reduce(
+          N,
+          [=](const int64_t j, double &l_result) {
+            double temp2 = 0;
+
+            for (int i = 0; i < M; ++i) {
+              temp2 += A[j * M + i] * x[i];
+            }
+
+            l_result += y[j] * temp2;
+          },
+          result);
+
+      // Output result.
+      if (repeat == (nrepeat - 1)) {
+        printf("  Computed result for %d x %d is %lf\n", N, M, result);
       }
 
-      result += y[j] * temp2;
+      const double solution = (double)N * (double)M;
+
+      if (result != solution) {
+        printf("  Error: result( %lf ) != solution( %lf )\n", result, solution);
+      }
     }
 
-    // Output result.
-    if (repeat == (nrepeat - 1)) {
-      printf("  Computed result for %d x %d is %lf\n", N, M, result);
-    }
+    gettimeofday(&end, NULL);
 
-    const double solution = (double)N * (double)M;
+    // Calculate time.
+    // double time = timer.seconds();
+    double time = 1.0 * (end.tv_sec - begin.tv_sec) +
+                  1.0e-6 * (end.tv_usec - begin.tv_usec);
 
-    if (result != solution) {
-      printf("  Error: result( %lf ) != solution( %lf )\n", result, solution);
-    }
+    // Calculate bandwidth.
+    // Each matrix A row (each of length M) is read once.
+    // The x vector (of length M) is read N times.
+    // The y vector (of length N) is read once.
+    // double Gbytes = 1.0e-9 * double( sizeof(double) * ( 2 * M * N + N ) );
+    double Gbytes = 1.0e-9 * double(sizeof(double) * (M + M * N + N));
+
+    // Print results (problem size, time and bandwidth in GB/s).
+    printf(
+        "  N( %d ) M( %d ) nrepeat ( %d ) problem( %g MB ) time( %g s ) "
+        "bandwidth( %g GB/s )\n",
+        N, M, nrepeat, Gbytes * 1000, time, Gbytes * nrepeat / time);
+
+    std::free(A);
+    std::free(y);
+    std::free(x);
+
+    // EXERCISE: finalize Kokkos runtime
   }
-
-  gettimeofday(&end, NULL);
-
-  // Calculate time.
-  // double time = timer.seconds();
-  double time = 1.0 * (end.tv_sec - begin.tv_sec) +
-                1.0e-6 * (end.tv_usec - begin.tv_usec);
-
-  // Calculate bandwidth.
-  // Each matrix A row (each of length M) is read once.
-  // The x vector (of length M) is read N times.
-  // The y vector (of length N) is read once.
-  // double Gbytes = 1.0e-9 * double( sizeof(double) * ( 2 * M * N + N ) );
-  double Gbytes = 1.0e-9 * double(sizeof(double) * (M + M * N + N));
-
-  // Print results (problem size, time and bandwidth in GB/s).
-  printf(
-      "  N( %d ) M( %d ) nrepeat ( %d ) problem( %g MB ) time( %g s ) "
-      "bandwidth( %g GB/s )\n",
-      N, M, nrepeat, Gbytes * 1000, time, Gbytes * nrepeat / time);
-
-  std::free(A);
-  std::free(y);
-  std::free(x);
-
-  // EXERCISE: finalize Kokkos runtime
-  // }
-  // Kokkos::finalize();
+  Kokkos::finalize();
 
   return 0;
 }
